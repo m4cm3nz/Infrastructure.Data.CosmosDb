@@ -12,6 +12,8 @@
     <RepositoryType>c#</RepositoryType>
     <NeutralLanguage>pt-BR</NeutralLanguage>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
   </PropertyGroup>
 
   <ItemGroup>
