@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+    <Company>McMenz IT</Company>
+    <Authors>Rafael Mac Menz</Authors>
+    <Description>A .NET Core 3.1 CosmosDb Repository based on Microsoft sample</Description>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReleaseNotes>CosmosDb Repository based on Microsoft sample</PackageReleaseNotes>
+    <PackageTags>repository cosmosdb</PackageTags>
+    <RepositoryType>c#</RepositoryType>
+    <NeutralLanguage>pt-BR</NeutralLanguage>
+    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Infrastructure.Data.Abstractions" Version="1.0.1" />
+    <PackageReference Include="Microsoft.Azure.DocumentDB.Core" Version="2.13.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>
