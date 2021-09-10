@@ -22,6 +22,18 @@ namespace Infrastructure.Data.CosmosDb
 
         private readonly DocumentClient client;
 
+        public Repository(IOptions<Settings> options) : this(
+            options,
+            options.Value.CollectionId,
+            options.Value.PartitionKey)
+        { }
+
+        public Repository(IOptions<Settings> options, string partitionKey) : this(
+            options,
+            options.Value.CollectionId,
+            partitionKey)
+        { }
+
         public Repository(IOptions<Settings> options, string collectionId, string partitionKey)
         {
             Endpoint = options.Value.Endpoint;
