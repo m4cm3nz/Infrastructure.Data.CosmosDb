@@ -96,7 +96,12 @@ namespace Infrastructure.Data.CosmosDb
         {
             try
             {
-                var document = await client.ReadDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id));
+                var document = await client.ReadDocumentAsync(
+                    UriFactory.CreateDocumentUri(
+                        DatabaseId,
+                        CollectionId,
+                        id.ToString()));
+
                 return (TEntity)(dynamic)document.Resource;
             }
             catch (DocumentClientException e)
@@ -130,12 +135,12 @@ namespace Infrastructure.Data.CosmosDb
 
         public virtual async Task Update(TEntity item, dynamic id)
         {
-            await client.ReplaceDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id), item);
+            await client.ReplaceDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id.ToString()), item);
         }
 
         public virtual async Task DeleteBy(dynamic id)
         {
-            await client.DeleteDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id));
+            await client.DeleteDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id.ToString()));
         }
 
         public virtual async Task<bool> FindByID(dynamic identity)
