@@ -7,16 +7,16 @@
     <Description>A .NET Core 3.1 CosmosDb Repository based on Microsoft sample</Description>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReleaseNotes>Adicionado dois novos construtores</PackageReleaseNotes>
+    <PackageReleaseNotes>Correção nos métodos de Delete e Update</PackageReleaseNotes>
     <PackageTags>repository cosmosdb</PackageTags>
     <RepositoryType>c#</RepositoryType>
     <NeutralLanguage>pt-BR</NeutralLanguage>
     <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
     <PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
     <RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <Version>1.0.1</Version>
-    <FileVersion>1.0.1.0</FileVersion>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <Version>1.0.2</Version>
+    <FileVersion>1.0.2.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
