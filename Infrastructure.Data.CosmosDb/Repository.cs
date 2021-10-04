@@ -96,11 +96,13 @@ namespace Infrastructure.Data.CosmosDb
         {
             try
             {
+                var options = new RequestOptions { PartitionKey = new PartitionKey(id.ToString()) };
+
                 var document = await client.ReadDocumentAsync(
                     UriFactory.CreateDocumentUri(
                         DatabaseId,
                         CollectionId,
-                        id.ToString()));
+                        id.ToString()), options);
 
                 return (TEntity)(dynamic)document.Resource;
             }
