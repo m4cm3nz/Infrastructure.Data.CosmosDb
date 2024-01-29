@@ -1,28 +1,30 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
-    <Company>McMenz IT</Company>
-    <Authors>Rafael Mac Menz</Authors>
-    <Description>A .NET 8.0 CosmosDb Repository based on Microsoft sample</Description>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageReleaseNotes>upgrade to .net 6.0</PackageReleaseNotes>
-    <PackageTags>repository cosmosdb</PackageTags>
-    <RepositoryType>c#</RepositoryType>
-    <NeutralLanguage>pt-BR</NeutralLanguage>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
-    <PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
-    <AssemblyVersion>8.0.0.0</AssemblyVersion>
-    <Version>8.0.0</Version>
-    <FileVersion>8.0.0.0</FileVersion>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Company>McMenz IT</Company>
+		<Authors>Rafael Mac Menz</Authors>
+		<Description>A .NET 8.0 CosmosDb Repository based on Microsoft sample</Description>
+		<GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageReleaseNotes>upgrade to .net 8.0</PackageReleaseNotes>
+		<PackageTags>repository cosmosdb</PackageTags>
+		<RepositoryType>c#</RepositoryType>
+		<NeutralLanguage>pt-BR</NeutralLanguage>
+		<PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+		<PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
+		<PackageReadmeFile>readme.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
+		<AssemblyVersion>8.0.0.0</AssemblyVersion>
+		<Version>8.0.0</Version>
+		<FileVersion>8.0.0.0</FileVersion>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Infrastructure.Data.Abstractions" Version="6.0.0" />
-    <PackageReference Include="Microsoft.Azure.DocumentDB.Core" Version="2.21.0" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.1" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="Infrastructure.Data.Abstractions" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Azure.DocumentDB.Core" Version="2.21.0" />
+		<PackageReference Include="Microsoft.Extensions.Options" Version="8.0.1" />
+		<None Include="..\readme.md" Pack="true" PackagePath="\"/>
+	</ItemGroup>
 
 </Project>
