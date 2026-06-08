@@ -21,6 +21,8 @@ namespace Infrastructure.Data.CosmosDb
         private readonly TimeSpan TimeOut;
 
         private readonly DocumentClient client;
+        // Parameterless protected ctor for testing to avoid initializing DocumentClient
+        protected Repository() { }
 
         public Repository(IOptions<Settings> options) : this(
             options,
@@ -52,7 +54,7 @@ namespace Infrastructure.Data.CosmosDb
             CreateCollectionIfNotExistsAsync().Wait(TimeOut);
         }
 
-        private async Task CreateDatabaseIfNotExistsAsync()
+        protected virtual async Task CreateDatabaseIfNotExistsAsync()
         {
             try
             {
@@ -67,7 +69,7 @@ namespace Infrastructure.Data.CosmosDb
             }
         }
 
-        private async Task CreateCollectionIfNotExistsAsync()
+        protected virtual async Task CreateCollectionIfNotExistsAsync()
         {
             try
             {
@@ -94,15 +96,20 @@ namespace Infrastructure.Data.CosmosDb
 
         public virtual async Task<TEntity> GetByID(dynamic id)
         {
+            return await ReadItemInternalAsync(id.ToString());
+        }
+
+        protected virtual async Task<TEntity> ReadItemInternalAsync(string id)
+        {
             try
             {
-                var options = new RequestOptions { PartitionKey = new PartitionKey(id.ToString()) };
+                var options = new RequestOptions { PartitionKey = new PartitionKey(id) };
 
                 var document = await client.ReadDocumentAsync(
                     UriFactory.CreateDocumentUri(
                         DatabaseId,
                         CollectionId,
-                        id.ToString()), options);
+                        id), options);
 
                 return (TEntity)(dynamic)document.Resource;
             }
@@ -116,6 +123,11 @@ namespace Infrastructure.Data.CosmosDb
         }
 
         public virtual async Task<IEnumerable<TEntity>> GetAll(Expression<Func<TEntity, bool>> predicate)
+        {
+            return await QueryItemsInternalAsync(predicate);
+        }
+
+        protected virtual async Task<IEnumerable<TEntity>> QueryItemsInternalAsync(Expression<Func<TEntity, bool>> predicate)
         {
             IDocumentQuery<TEntity> query = client.CreateDocumentQuery<TEntity>(
                 UriFactory.CreateDocumentCollectionUri(DatabaseId, CollectionId),
@@ -132,17 +144,32 @@ namespace Infrastructure.Data.CosmosDb
 
         public virtual async Task<dynamic> Add(TEntity item)
         {
+            return await CreateItemInternalAsync(item);
+        }
+
+        protected virtual async Task<dynamic> CreateItemInternalAsync(TEntity item)
+        {
             return (await client.CreateDocumentAsync(UriFactory.CreateDocumentCollectionUri(DatabaseId, CollectionId), item)).Resource.Id;
         }
 
         public virtual async Task Update(TEntity item, dynamic id)
         {
-            await client.ReplaceDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id.ToString()), item);
+            await ReplaceItemInternalAsync(item, id.ToString());
+        }
+
+        protected virtual async Task ReplaceItemInternalAsync(TEntity item, string id)
+        {
+            await client.ReplaceDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id), item);
         }
 
         public virtual async Task DeleteBy(dynamic id)
         {
-            await client.DeleteDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id.ToString()));
+            await DeleteItemInternalAsync(id.ToString());
+        }
+
+        protected virtual async Task DeleteItemInternalAsync(string id)
+        {
+            await client.DeleteDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id));
         }
 
         public virtual async Task<bool> FindByID(dynamic identity)
