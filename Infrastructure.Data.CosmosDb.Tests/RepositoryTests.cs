@@ -1,8 +1,8 @@
 using Infrastructure.Data.CosmosDb;
-using Microsoft.Azure.Documents;
-using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Xunit;
 
@@ -11,6 +11,13 @@ namespace Infrastructure.Data.CosmosDb.Tests
     public class FakeEntity
     {
         public string Id { get; set; }
+        public string Name { get; set; }
+    }
+
+    public class FakeEntityWithJsonProperty
+    {
+        [JsonPropertyName("id")]
+        public string DocumentId { get; set; }
         public string Name { get; set; }
     }
 
@@ -26,9 +33,13 @@ namespace Infrastructure.Data.CosmosDb.Tests
             return Task.FromResult(v);
         }
 
+        protected override Task<IEnumerable<FakeEntity>> QueryAllItemsInternalAsync()
+        {
+            return Task.FromResult<IEnumerable<FakeEntity>>(new List<FakeEntity>(store.Values));
+        }
+
         protected override Task<IEnumerable<FakeEntity>> QueryItemsInternalAsync(System.Linq.Expressions.Expression<Func<FakeEntity, bool>> predicate)
         {
-            // naive evaluation for tests: compile predicate
             var func = predicate.Compile();
             var list = new List<FakeEntity>();
             foreach (var v in store.Values)
@@ -47,6 +58,32 @@ namespace Infrastructure.Data.CosmosDb.Tests
         {
             store[id] = item;
             return Task.CompletedTask;
+        }
+
+        protected override Task DeleteItemInternalAsync(string id)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+    }
+
+    class TestRepositoryWithJsonProperty : Repository<FakeEntityWithJsonProperty>
+    {
+        private readonly Dictionary<string, FakeEntityWithJsonProperty> store = new();
+
+        public TestRepositoryWithJsonProperty() : base() { }
+
+        protected override Task<FakeEntityWithJsonProperty> ReadItemInternalAsync(string id)
+        {
+            store.TryGetValue(id, out var v);
+            return Task.FromResult(v);
+        }
+
+        protected override Task<dynamic> CreateItemInternalAsync(FakeEntityWithJsonProperty item)
+        {
+            if (string.IsNullOrEmpty(item.DocumentId)) item.DocumentId = Guid.NewGuid().ToString();
+            store[item.DocumentId] = item;
+            return Task.FromResult<object>(item.DocumentId);
         }
 
         protected override Task DeleteItemInternalAsync(string id)
@@ -87,7 +124,7 @@ namespace Infrastructure.Data.CosmosDb.Tests
         }
 
         [Fact]
-        public async Task Delete_Should_Remove()
+        public async Task DeleteBy_Id_Should_Remove()
         {
             var repo = new TestRepository();
             var entity = new FakeEntity { Name = "test" };
@@ -99,7 +136,56 @@ namespace Infrastructure.Data.CosmosDb.Tests
         }
 
         [Fact]
-        public async Task Query_Should_Filter()
+        public async Task DeleteBy_Entity_Should_Remove()
+        {
+            var repo = new TestRepository();
+            var entity = new FakeEntity { Name = "test" };
+            await repo.Add(entity);
+
+            await repo.DeleteBy(entity);
+            var fetched = await repo.GetByID(entity.Id);
+            Assert.Null(fetched);
+        }
+
+        [Fact]
+        public async Task GetAll_Should_Return_All_Items()
+        {
+            var repo = new TestRepository();
+            await repo.Add(new FakeEntity { Name = "a" });
+            await repo.Add(new FakeEntity { Name = "b" });
+
+            var results = await repo.GetAll();
+            Assert.Equal(2, results.Count());
+        }
+
+        [Fact]
+        public async Task Add_With_JsonPropertyName_Should_Resolve_Id()
+        {
+            var repo = new TestRepositoryWithJsonProperty();
+            var entity = new FakeEntityWithJsonProperty { Name = "test" };
+
+            var id = await repo.Add(entity);
+            Assert.NotNull(id);
+
+            var fetched = await repo.GetByID(id);
+            Assert.NotNull(fetched);
+            Assert.Equal("test", fetched.Name);
+        }
+
+        [Fact]
+        public async Task DeleteBy_Entity_With_JsonPropertyName_Should_Remove()
+        {
+            var repo = new TestRepositoryWithJsonProperty();
+            var entity = new FakeEntityWithJsonProperty { Name = "test" };
+            await repo.Add(entity);
+
+            await repo.DeleteBy(entity);
+            var fetched = await repo.GetByID(entity.DocumentId);
+            Assert.Null(fetched);
+        }
+
+        [Fact]
+        public async Task GetAll_With_Predicate_Should_Filter()
         {
             var repo = new TestRepository();
             await repo.Add(new FakeEntity { Name = "a" });
