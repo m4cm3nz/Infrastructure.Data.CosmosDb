@@ -1,7 +1,6 @@
 ﻿using Infrastructure.Data.Abstractions;
-using Microsoft.Azure.Documents;
-using Microsoft.Azure.Documents.Client;
-using Microsoft.Azure.Documents.Linq;
+using Microsoft.Azure.Cosmos;
+using Microsoft.Azure.Cosmos.Linq;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
@@ -20,8 +19,9 @@ namespace Infrastructure.Data.CosmosDb
         private readonly string partitionKey;
         private readonly TimeSpan TimeOut;
 
-        private readonly DocumentClient client;
-        // Parameterless protected ctor for testing to avoid initializing DocumentClient
+        private readonly CosmosClient client;
+        private readonly Container container;
+
         protected Repository() { }
 
         public Repository(IOptions<Settings> options) : this(
@@ -36,6 +36,32 @@ namespace Infrastructure.Data.CosmosDb
             partitionKey)
         { }
 
+        public Repository(CosmosClient cosmosClient, IOptions<Settings> options) : this(
+            cosmosClient,
+            options,
+            options.Value.CollectionId,
+            options.Value.PartitionKey)
+        { }
+
+        public Repository(CosmosClient cosmosClient, IOptions<Settings> options, string collectionId, string partitionKey)
+        {
+            Endpoint = options.Value.Endpoint;
+            Key = options.Value.Key;
+            DatabaseId = options.Value.DatabaseId;
+            CollectionId = collectionId;
+            this.partitionKey = partitionKey;
+            TimeOut = TimeSpan.FromMilliseconds(
+                double.TryParse(options.Value.TimeOut,
+                out double timeOut) ? timeOut : 3);
+
+            client = cosmosClient;
+
+            CreateDatabaseIfNotExistsAsync().Wait(TimeOut);
+            CreateCollectionIfNotExistsAsync().Wait(TimeOut);
+
+            container = client.GetContainer(DatabaseId, CollectionId);
+        }
+
         public Repository(IOptions<Settings> options, string collectionId, string partitionKey)
         {
             Endpoint = options.Value.Endpoint;
@@ -47,51 +73,25 @@ namespace Infrastructure.Data.CosmosDb
                 double.TryParse(options.Value.TimeOut,
                 out double timeOut) ? timeOut : 3);
 
-            client = new DocumentClient(new Uri(Endpoint), Key);
-            client.ConnectionPolicy.RequestTimeout = TimeOut;
+            client = new CosmosClient(Endpoint, Key);
 
             CreateDatabaseIfNotExistsAsync().Wait(TimeOut);
             CreateCollectionIfNotExistsAsync().Wait(TimeOut);
+
+            container = client.GetContainer(DatabaseId, CollectionId);
         }
 
         protected virtual async Task CreateDatabaseIfNotExistsAsync()
         {
-            try
-            {
-                await client.ReadDatabaseAsync(UriFactory.CreateDatabaseUri(DatabaseId));
-            }
-            catch (DocumentClientException e)
-            {
-                if (e.StatusCode == System.Net.HttpStatusCode.NotFound)
-                    await client.CreateDatabaseAsync(new Database { Id = DatabaseId });
-                else
-                    throw;
-            }
+            await client.CreateDatabaseIfNotExistsAsync(DatabaseId);
         }
 
         protected virtual async Task CreateCollectionIfNotExistsAsync()
         {
-            try
-            {
-                await client.ReadDocumentCollectionAsync(UriFactory.CreateDocumentCollectionUri(DatabaseId, CollectionId));
-            }
-            catch (DocumentClientException e)
-            {
-                if (e.StatusCode == System.Net.HttpStatusCode.NotFound)
-                {
-                    var documentCollection = new DocumentCollection { Id = CollectionId };
-
-                    if (!string.IsNullOrEmpty(partitionKey))
-                        documentCollection.PartitionKey.Paths.Add(partitionKey);
-
-                    await client.CreateDocumentCollectionAsync(
-                        UriFactory.CreateDatabaseUri(DatabaseId),
-                        documentCollection,
-                        new RequestOptions { OfferThroughput = 1000 });
-                }
-                else
-                    throw;
-            }
+            var database = client.GetDatabase(DatabaseId);
+            var pk = string.IsNullOrEmpty(partitionKey) ? "/_partitionKey" : partitionKey;
+            var containerProperties = new ContainerProperties(CollectionId, pk);
+            await database.CreateContainerIfNotExistsAsync(containerProperties, throughput: 1000);
         }
 
         public virtual async Task<TEntity> GetByID(dynamic id)
@@ -103,17 +103,10 @@ namespace Infrastructure.Data.CosmosDb
         {
             try
             {
-                var options = new RequestOptions { PartitionKey = new PartitionKey(id) };
-
-                var document = await client.ReadDocumentAsync(
-                    UriFactory.CreateDocumentUri(
-                        DatabaseId,
-                        CollectionId,
-                        id), options);
-
-                return (TEntity)(dynamic)document.Resource;
+                var response = await container.ReadItemAsync<TEntity>(id, new PartitionKey(id));
+                return response.Resource;
             }
-            catch (DocumentClientException e)
+            catch (CosmosException e)
             {
                 if (e.StatusCode == System.Net.HttpStatusCode.NotFound)
                     return default;
@@ -129,15 +122,15 @@ namespace Infrastructure.Data.CosmosDb
 
         protected virtual async Task<IEnumerable<TEntity>> QueryItemsInternalAsync(Expression<Func<TEntity, bool>> predicate)
         {
-            IDocumentQuery<TEntity> query = client.CreateDocumentQuery<TEntity>(
-                UriFactory.CreateDocumentCollectionUri(DatabaseId, CollectionId),
-                new FeedOptions { MaxItemCount = -1, EnableCrossPartitionQuery = true })
-                .Where(predicate)
-                .AsDocumentQuery();
+            var queryable = container.GetItemLinqQueryable<TEntity>(true).Where(predicate);
+            var iterator = queryable.ToFeedIterator();
 
             var results = new List<TEntity>();
-            while (query.HasMoreResults)
-                results.AddRange(await query.ExecuteNextAsync<TEntity>());
+            while (iterator.HasMoreResults)
+            {
+                var response = await iterator.ReadNextAsync();
+                results.AddRange(response.Resource);
+            }
 
             return results;
         }
@@ -149,7 +142,10 @@ namespace Infrastructure.Data.CosmosDb
 
         protected virtual async Task<dynamic> CreateItemInternalAsync(TEntity item)
         {
-            return (await client.CreateDocumentAsync(UriFactory.CreateDocumentCollectionUri(DatabaseId, CollectionId), item)).Resource.Id;
+            var response = await container.CreateItemAsync(item);
+            var resource = response.Resource;
+            var idProp = resource.GetType().GetProperty("id") ?? resource.GetType().GetProperty("Id");
+            return idProp != null ? idProp.GetValue(resource) : (dynamic)resource;
         }
 
         public virtual async Task Update(TEntity item, dynamic id)
@@ -159,7 +155,7 @@ namespace Infrastructure.Data.CosmosDb
 
         protected virtual async Task ReplaceItemInternalAsync(TEntity item, string id)
         {
-            await client.ReplaceDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id), item);
+            await container.ReplaceItemAsync(item, id, new PartitionKey(id));
         }
 
         public virtual async Task DeleteBy(dynamic id)
@@ -169,7 +165,7 @@ namespace Infrastructure.Data.CosmosDb
 
         protected virtual async Task DeleteItemInternalAsync(string id)
         {
-            await client.DeleteDocumentAsync(UriFactory.CreateDocumentUri(DatabaseId, CollectionId, id));
+            await container.DeleteItemAsync<TEntity>(id, new PartitionKey(id));
         }
 
         public virtual async Task<bool> FindByID(dynamic identity)
