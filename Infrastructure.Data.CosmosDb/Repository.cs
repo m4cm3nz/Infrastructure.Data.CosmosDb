@@ -34,6 +34,9 @@ namespace Infrastructure.Data.CosmosDb
         private readonly CosmosClient client;
         private readonly Container container;
 
+        private PartitionKey ResolvePartitionKey(string value) =>
+            string.IsNullOrEmpty(partitionKey) ? PartitionKey.None : new PartitionKey(value);
+
         private static readonly System.Reflection.PropertyInfo IdProperty =
             typeof(TEntity).GetProperty("Id") ??
             typeof(TEntity).GetProperty("id") ??
@@ -149,7 +152,7 @@ namespace Infrastructure.Data.CosmosDb
         {
             try
             {
-                var response = await container.ReadItemAsync<TEntity>(id, new PartitionKey(id));
+                var response = await container.ReadItemAsync<TEntity>(id, ResolvePartitionKey(id));
                 return response.Resource;
             }
             catch (CosmosException e)
@@ -243,7 +246,7 @@ namespace Infrastructure.Data.CosmosDb
         /// </summary>
         protected virtual async Task ReplaceItemInternalAsync(TEntity item, string id)
         {
-            await container.ReplaceItemAsync(item, id, new PartitionKey(id));
+            await container.ReplaceItemAsync(item, id, ResolvePartitionKey(id));
         }
 
         /// <summary>
@@ -276,7 +279,7 @@ namespace Infrastructure.Data.CosmosDb
         /// </summary>
         protected virtual async Task DeleteItemInternalAsync(string id)
         {
-            await container.DeleteItemAsync<TEntity>(id, new PartitionKey(id));
+            await container.DeleteItemAsync<TEntity>(id, ResolvePartitionKey(id));
         }
 
         /// <summary>

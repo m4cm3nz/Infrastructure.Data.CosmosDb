@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `DeleteBy(dynamic id)` and `Update` were missing `PartitionKey` in `RequestOptions` — operations on partitioned containers would fail at runtime
+- Read, update and delete operations now use `PartitionKey.None` when no partition key is configured (non-partitioned containers), instead of `new PartitionKey(id)` which caused 404 errors
 - Package metadata corrected: `Version`, `AssemblyVersion`, `FileVersion`, `Description`, `PackageReleaseNotes`, `RepositoryType`, `NeutralLanguage`, `PackageTags`
 
 ## [8.0.0] - 2024-01-01
