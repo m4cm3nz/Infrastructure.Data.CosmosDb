@@ -5,10 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [10.0.0] - 2026-06-10
+## [10.0.0] - 2026-06-11
 
 ### Added
-- CosmosClient injection via constructor — recommended for production (shared connection pool)
+- `CosmosStjSerializer` — `CosmosLinqSerializer` baseado em `System.Text.Json` com camelCase; suporta `[JsonPropertyName]` em entidades e traduz queries LINQ corretamente
+- `CosmosServiceExtensions.AddCosmosClient()` — registra `CosmosClient` singleton com `CosmosStjSerializer` (recomendado para projetos novos)
+- `CosmosServiceExtensions.AddCosmosClientWithNewtonsoft()` — registra `CosmosClient` singleton com o serializador Newtonsoft.Json built-in do SDK (para projetos existentes)
+- Projeto `Infrastructure.Data.CosmosDb.IntegrationTests` com 9 testes de integração contra o Azure Cosmos DB Emulator (auto-skip quando emulador não está disponível)
+- `docker-compose.yml` com imagem Linux do emulador para ambiente Docker
+- `CosmosClient` injection via constructor — recommended for production (shared connection pool)
 - `GetAll()` full implementation returning all documents in the container
 - `DeleteBy(TEntity entity)` full implementation resolving the document id via reflection
 - Project `Infrastructure.Data.CosmosDb.Tests` with 8 unit tests covering all CRUD operations
@@ -17,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AzureCosmosDisableNewtonsoftJsonCheck` property — removes unnecessary Newtonsoft.Json dependency
 
 ### Changed
+- **Breaking:** Construtores que criavam `CosmosClient` internamente foram removidos — `CosmosClient` singleton deve ser injetado via DI; use `AddCosmosClient()` ou `AddCosmosClientWithNewtonsoft()`
 - **Breaking:** Migrated from deprecated `Microsoft.Azure.DocumentDB.Core` to `Microsoft.Azure.Cosmos` v3.61.0
 - **Breaking:** Target framework updated from `net8.0` to `net10.0`
 - `Settings.TimeOut` removed — no longer used; connection timeout is managed by the Cosmos SDK
@@ -27,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `DeleteBy(TEntity entity)` now throws `InvalidOperationException` when the resolved id value is null, instead of passing null to the Cosmos SDK
 
 ### Fixed
+- `CreateItemInternalAsync` gera GUID se o id da entidade for nulo e passa o partition key explicitamente — corrige `BadRequest 400` e `ArgumentException` ao criar itens
 - `DeleteBy(dynamic id)` and `Update` were missing `PartitionKey` in `RequestOptions` — operations on partitioned containers would fail at runtime
 - Read, update and delete operations now use `PartitionKey.None` when no partition key is configured (non-partitioned containers), instead of `new PartitionKey(id)` which caused 404 errors
 - Package metadata corrected: `Version`, `AssemblyVersion`, `FileVersion`, `Description`, `PackageReleaseNotes`, `RepositoryType`, `NeutralLanguage`, `PackageTags`
