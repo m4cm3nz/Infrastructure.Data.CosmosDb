@@ -13,17 +13,20 @@ namespace Infrastructure.Data.CosmosDb
 {
     /// <summary>
     /// Abstract base repository for Azure Cosmos DB, implementing <see cref="IRepository{TEntity}"/>.
-    /// Handles database and container creation on startup, and delegates all data access
-    /// to overridable protected methods for easy customization and unit testing.
+    /// Requires an injected <see cref="CosmosClient"/> singleton. Handles database and container
+    /// creation on startup, and delegates all data access to overridable protected methods
+    /// for easy customization and unit testing.
     /// </summary>
     /// <typeparam name="TEntity">
-    /// The entity type. Must be a class and expose a string property that resolves to the Cosmos DB document id,
-    /// in one of these forms (checked in order):
+    /// The entity type. Must be a class and expose a string property that resolves to the Cosmos DB
+    /// document id, in one of these forms (checked in order):
     /// <list type="number">
     ///   <item>A property named <c>Id</c></item>
     ///   <item>A property named <c>id</c></item>
     ///   <item>Any property decorated with <c>[JsonPropertyName("id")]</c></item>
     /// </list>
+    /// The <see cref="CosmosClient"/> must be configured with a serializer that maps the chosen
+    /// property to the JSON field <c>id</c> (e.g. camelCase naming policy for <c>Id</c>).
     /// </typeparam>
     public abstract class Repository<TEntity> : IRepository<TEntity> where TEntity : class
     {
@@ -52,28 +55,8 @@ namespace Infrastructure.Data.CosmosDb
         protected Repository() { }
 
         /// <summary>
-        /// Initializes the repository using settings from <see cref="Settings"/>.
-        /// Creates the database and container if they do not exist.
-        /// </summary>
-        public Repository(IOptions<Settings> options) : this(
-            options,
-            options.Value.CollectionId,
-            options.Value.PartitionKey)
-        { }
-
-        /// <summary>
-        /// Initializes the repository using settings from <see cref="Settings"/>,
-        /// overriding the partition key defined in configuration.
-        /// </summary>
-        public Repository(IOptions<Settings> options, string partitionKey) : this(
-            options,
-            options.Value.CollectionId,
-            partitionKey)
-        { }
-
-        /// <summary>
         /// Initializes the repository using a shared <see cref="CosmosClient"/> instance
-        /// and settings from <see cref="Settings"/>. Preferred for production use.
+        /// and settings from <see cref="Settings"/>.
         /// </summary>
         public Repository(CosmosClient cosmosClient, IOptions<Settings> options) : this(
             cosmosClient,
@@ -92,21 +75,6 @@ namespace Infrastructure.Data.CosmosDb
             CollectionId = collectionId;
             this.partitionKey = partitionKey;
             client = cosmosClient;
-            InitializeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
-            container = client.GetContainer(DatabaseId, CollectionId);
-        }
-
-        /// <summary>
-        /// Initializes the repository creating an internal <see cref="CosmosClient"/> from
-        /// the endpoint and key in <see cref="Settings"/>, overriding both the collection id
-        /// and partition key defined in configuration.
-        /// </summary>
-        public Repository(IOptions<Settings> options, string collectionId, string partitionKey)
-        {
-            DatabaseId = options.Value.DatabaseId;
-            CollectionId = collectionId;
-            this.partitionKey = partitionKey;
-            client = new CosmosClient(options.Value.Endpoint, options.Value.Key);
             InitializeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
             container = client.GetContainer(DatabaseId, CollectionId);
         }
@@ -229,7 +197,15 @@ namespace Infrastructure.Data.CosmosDb
         {
             if (IdProperty == null)
                 throw new InvalidOperationException($"Type {typeof(TEntity).Name} must expose an Id or id property.");
-            var response = await container.CreateItemAsync(item).ConfigureAwait(false);
+
+            var id = IdProperty.GetValue(item)?.ToString();
+            if (string.IsNullOrEmpty(id))
+            {
+                id = Guid.NewGuid().ToString();
+                IdProperty.SetValue(item, id);
+            }
+
+            var response = await container.CreateItemAsync(item, ResolvePartitionKey(id)).ConfigureAwait(false);
             return IdProperty.GetValue(response.Resource)?.ToString();
         }
 
