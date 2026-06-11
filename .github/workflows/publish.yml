@@ -31,13 +31,27 @@ jobs:
       - name: Pack
         run: dotnet pack Infrastructure.Data.CosmosDb/Infrastructure.Data.CosmosDb.csproj -c Release --no-build -o ./nupkg
 
-      - name: Get NuGet OIDC token
+      - name: Get NuGet API token via Trusted Publishing
         id: oidc
         run: |
-          TOKEN=$(curl -s \
+          # Step 1: get GitHub OIDC JWT with nuget.org audience
+          GITHUB_JWT=$(curl -sS \
             -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=nuget.org" | jq -r '.value')
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=nuget.org" | jq -r '.value')
+
+          # Step 2: exchange GitHub JWT for a short-lived NuGet API token
+          NUGET_TOKEN=$(curl -sS -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"oidcToken\": \"$GITHUB_JWT\"}" \
+            "https://www.nuget.org/api/v2/trustedpublisher/token" | jq -r '.token // empty')
+
+          if [ -z "$NUGET_TOKEN" ]; then
+            echo "::error::Failed to obtain NuGet token from Trusted Publishing endpoint"
+            exit 1
+          fi
+
+          echo "::add-mask::$NUGET_TOKEN"
+          echo "token=$NUGET_TOKEN" >> $GITHUB_OUTPUT
 
       - name: Push to NuGet
         run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.oidc.outputs.token }}
