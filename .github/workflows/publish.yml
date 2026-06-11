@@ -31,5 +31,13 @@ jobs:
       - name: Pack
         run: dotnet pack Infrastructure.Data.CosmosDb/Infrastructure.Data.CosmosDb.csproj -c Release --no-build -o ./nupkg
 
+      - name: Get NuGet OIDC token
+        id: oidc
+        run: |
+          TOKEN=$(curl -s \
+            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=nuget.org" | jq -r '.value')
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
       - name: Push to NuGet
-        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.oidc.outputs.token }}
