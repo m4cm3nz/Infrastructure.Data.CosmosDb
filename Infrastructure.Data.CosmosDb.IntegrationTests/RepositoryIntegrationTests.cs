@@ -1,5 +1,6 @@
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Options;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json.Serialization;
@@ -24,6 +25,21 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
         public string Content { get; set; }
     }
 
+    /// <summary>Partition key is /tenantId (non-id field) to validate entity-based PK resolution.</summary>
+    public class TenantEntity
+    {
+        public string Id { get; set; }
+        public string TenantId { get; set; }
+        public string Name { get; set; }
+    }
+
+    public class TenantEntityWithNullPk
+    {
+        public string Id { get; set; }
+        public string TenantId { get; set; }  // will be left null to trigger the throw
+        public string Name { get; set; }
+    }
+
     // --- Repositories ---
 
     public class OrderRepository : Repository<OrderEntity>
@@ -38,6 +54,18 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
             : base(client, options, "Packages", "") { }
     }
 
+    public class TenantRepository : Repository<TenantEntity>
+    {
+        public TenantRepository(CosmosClient client, IOptions<Settings> options)
+            : base(client, options) { }
+    }
+
+    public class TenantNullPkRepository : Repository<TenantEntityWithNullPk>
+    {
+        public TenantNullPkRepository(CosmosClient client, IOptions<Settings> options)
+            : base(client, options) { }
+    }
+
     // --- Tests ---
 
     public class RepositoryIntegrationTests(CosmosEmulatorFixture fixture)
@@ -48,6 +76,12 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
 
         private PackageRepository CreatePackageRepo() =>
             new(fixture.Client, fixture.CreateOptions("Packages", ""));
+
+        private TenantRepository CreateTenantRepo() =>
+            new(fixture.Client, fixture.CreateOptions("Tenants", "/tenantId"));
+
+        private TenantNullPkRepository CreateTenantNullPkRepo() =>
+            new(fixture.Client, fixture.CreateOptions("TenantsNullPk", "/tenantId"));
 
         [SkippableFact]
         public async Task Add_And_GetById_Should_Work()
@@ -179,6 +213,76 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
 
             var fetched = await repo.GetByID(entity.DocumentId);
             Assert.Null(fetched);
+        }
+
+        // --- Non-id partition key tests ---
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_Add_And_GetAll_Should_Work()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantRepo();
+            var entity = new TenantEntity { TenantId = "tenant-a", Name = "Empresa A" };
+
+            var id = await repo.Add(entity);
+            Assert.NotNull(id);
+
+            var results = await repo.GetAll(x => x.TenantId == "tenant-a");
+            Assert.Single(results);
+            Assert.Equal("Empresa A", results.First().Name);
+        }
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_Update_Should_Replace()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantRepo();
+            var entity = new TenantEntity { TenantId = "tenant-b", Name = "Original" };
+            var id = await repo.Add(entity);
+
+            entity.Name = "Atualizado";
+            await repo.Update(entity, id);
+
+            var idStr = (string)id;
+            var results = await repo.GetAll(x => x.Id == idStr);
+            Assert.Equal("Atualizado", results.First().Name);
+        }
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_DeleteBy_Entity_Should_Remove()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantRepo();
+            var entity = new TenantEntity { TenantId = "tenant-c", Name = "Para Deletar" };
+            await repo.Add(entity);
+
+            await repo.DeleteBy(entity);
+
+            var results = await repo.GetAll(x => x.Id == entity.Id);
+            Assert.Empty(results);
+        }
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_NullValue_Should_ThrowInvalidOperationException()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantNullPkRepo();
+            var entity = new TenantEntityWithNullPk { TenantId = null, Name = "sem pk" };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => repo.Add(entity));
+        }
+
+        [SkippableFact]
+        public void InvalidPartitionKeyPath_Should_ThrowArgumentException_AtConstruction()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            Assert.Throws<ArgumentException>(() =>
+                new OrderRepository(fixture.Client, fixture.CreateOptions("Orders", "/NonExistentProperty")));
         }
     }
 }

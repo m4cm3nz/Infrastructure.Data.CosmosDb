@@ -244,6 +244,7 @@ dotnet test Infrastructure.Data.CosmosDb.IntegrationTests
 - The database and container are created automatically on first use if they do not exist.
 - Default container throughput is **1000 RU/s**. Override `CreateCollectionIfNotExistsAsync` to customize.
 - `Add` generates a GUID id if the entity's id property is null or empty.
-- This implementation assumes the **partition key value equals the document id**. Override the protected methods if your partition strategy differs.
+- The partition key **value** for `Add`, `Update` and `DeleteBy(entity)` is resolved automatically from the entity via reflection on the configured `PartitionKey` path. Supports slash notation (`/Header/VersionCode`) and dot notation (`/Header.VersionCode`). Property lookup is case-insensitive. The path is validated against the entity type at construction time — an invalid path throws `ArgumentException` at startup. A null value at runtime throws `InvalidOperationException` with a descriptive message. `GetByID` and `DeleteBy(id)` fall back to using the document id as the partition key value.
+- If you override `DeleteItemInternalAsync(string id)` for custom deletion logic (audit, soft-delete, etc.), also override `DeleteItemInternalAsync(TEntity entity, string id)` — `DeleteBy(TEntity)` dispatches to the entity overload, not the string-id overload.
 - `Add` returns `dynamic` (interface contract) — call `.ToString()` to get the id as a string.
 - Entities must expose a string property that resolves to the Cosmos DB document `id` — either named `Id`, `id`, or decorated with `[JsonPropertyName("id")]`. If none is found, `Add` and `DeleteBy(entity)` throw `InvalidOperationException`.

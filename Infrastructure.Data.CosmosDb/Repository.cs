@@ -4,6 +4,7 @@ using Microsoft.Azure.Cosmos.Linq;
 using Microsoft.Extensions.Options;
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
@@ -33,14 +34,66 @@ namespace Infrastructure.Data.CosmosDb
         private readonly string DatabaseId;
         private readonly string CollectionId;
         private readonly string partitionKey;
+        private readonly PropertyInfo[] partitionKeyProperties;
 
         private readonly CosmosClient client;
         private readonly Container container;
 
-        private PartitionKey ResolvePartitionKey(string value) =>
-            string.IsNullOrEmpty(partitionKey) ? PartitionKey.None : new PartitionKey(value);
+        // Used by GetByID and DeleteBy(id) — only viable when PK path == id path.
+        private PartitionKey ResolvePartitionKey(string id) =>
+            partitionKeyProperties == null ? PartitionKey.None : new PartitionKey(id);
 
-        private static readonly System.Reflection.PropertyInfo IdProperty =
+        // Used by Add, Update, DeleteBy(entity) — resolves the PK value from the entity via cached reflection.
+        private PartitionKey ResolvePartitionKey(TEntity entity)
+        {
+            if (partitionKeyProperties == null)
+                return PartitionKey.None;
+
+            object current = entity;
+            foreach (var prop in partitionKeyProperties)
+            {
+                current = prop.GetValue(current);
+                if (current == null)
+                    throw new InvalidOperationException(
+                        $"Partition key path '{partitionKey}' resolved to null on property '{prop.Name}'. " +
+                        $"Ensure the entity is fully populated before calling this operation.");
+            }
+            return new PartitionKey(Convert.ToString(current, CultureInfo.InvariantCulture));
+        }
+
+        /// <summary>
+        /// Resolves and caches the <see cref="PropertyInfo"/> chain for a partition key path.
+        /// Supports both slash notation (<c>/Header/VersionCode</c>) and dot notation (<c>/Header.VersionCode</c>).
+        /// Property lookup is case-insensitive. Returns <c>null</c> when <paramref name="path"/> is empty.
+        /// </summary>
+        /// <exception cref="ArgumentException">
+        /// Thrown when any segment of <paramref name="path"/> does not match a public property on the
+        /// expected type, allowing misconfigured paths to be caught at startup.
+        /// </exception>
+        private static PropertyInfo[] BuildPartitionKeyProperties(Type entityType, string path)
+        {
+            if (string.IsNullOrEmpty(path))
+                return null;
+
+            var segments = path.TrimStart('/').Split(new[] { '.', '/' }, StringSplitOptions.RemoveEmptyEntries);
+            var props = new PropertyInfo[segments.Length];
+            var currentType = entityType;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                var prop = currentType.GetProperty(segments[i],
+                    BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
+                if (prop == null)
+                    throw new ArgumentException(
+                        $"Property '{segments[i]}' not found on type '{currentType.Name}' " +
+                        $"for partition key path '{path}'.",
+                        nameof(path));
+                props[i] = prop;
+                currentType = prop.PropertyType;
+            }
+            return props;
+        }
+
+        private static readonly PropertyInfo IdProperty =
             typeof(TEntity).GetProperty("Id") ??
             typeof(TEntity).GetProperty("id") ??
             Array.Find(
@@ -53,6 +106,21 @@ namespace Infrastructure.Data.CosmosDb
         /// Override the protected internal methods to provide a test-friendly data store.
         /// </summary>
         protected Repository() { }
+
+        /// <summary>
+        /// Protected constructor for unit testing with a partition key path. Validates the path
+        /// against <typeparamref name="TEntity"/> at construction time but does not establish
+        /// a Cosmos DB connection. Override the protected internal methods to provide a test-friendly data store.
+        /// </summary>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="partitionKeyPath"/> contains a segment that does not match
+        /// any public property on <typeparamref name="TEntity"/> or its nested types.
+        /// </exception>
+        protected Repository(string partitionKeyPath)
+        {
+            partitionKey = partitionKeyPath;
+            partitionKeyProperties = BuildPartitionKeyProperties(typeof(TEntity), partitionKeyPath);
+        }
 
         /// <summary>
         /// Initializes the repository using a shared <see cref="CosmosClient"/> instance
@@ -69,11 +137,16 @@ namespace Infrastructure.Data.CosmosDb
         /// Initializes the repository using a shared <see cref="CosmosClient"/> instance,
         /// overriding both the collection id and partition key defined in configuration.
         /// </summary>
+        /// <exception cref="ArgumentException">
+        /// Thrown when <paramref name="partitionKey"/> contains a segment that does not match
+        /// any public property on <typeparamref name="TEntity"/> or its nested types.
+        /// </exception>
         public Repository(CosmosClient cosmosClient, IOptions<Settings> options, string collectionId, string partitionKey)
         {
             DatabaseId = options.Value.DatabaseId;
             CollectionId = collectionId;
             this.partitionKey = partitionKey;
+            partitionKeyProperties = BuildPartitionKeyProperties(typeof(TEntity), partitionKey);
             client = cosmosClient;
             InitializeAsync().ConfigureAwait(false).GetAwaiter().GetResult();
             container = client.GetContainer(DatabaseId, CollectionId);
@@ -106,7 +179,9 @@ namespace Infrastructure.Data.CosmosDb
 
         /// <summary>
         /// Returns the entity with the given id, or <c>null</c> if not found.
-        /// Assumes the partition key value equals the document id.
+        /// Assumes the partition key value equals the document id — only reliable when
+        /// <c>Settings.PartitionKey</c> points to the id field. For other partition key strategies,
+        /// use <see cref="GetAll(Expression{Func{TEntity, bool}})"/> to query by the partition key field.
         /// </summary>
         public virtual async Task<TEntity> GetByID(dynamic id)
         {
@@ -183,7 +258,8 @@ namespace Infrastructure.Data.CosmosDb
         /// Inserts the entity and returns the generated id as <c>string</c>.
         /// </summary>
         /// <exception cref="InvalidOperationException">
-        /// Thrown when <typeparamref name="TEntity"/> does not expose an <c>Id</c> or <c>id</c> property.
+        /// Thrown when <typeparamref name="TEntity"/> does not expose an <c>Id</c> or <c>id</c> property,
+        /// or when the partition key path resolves to a null value on the entity.
         /// </exception>
         public virtual async Task<dynamic> Add(TEntity item)
         {
@@ -205,7 +281,7 @@ namespace Infrastructure.Data.CosmosDb
                 IdProperty.SetValue(item, id);
             }
 
-            var response = await container.CreateItemAsync(item, ResolvePartitionKey(id)).ConfigureAwait(false);
+            var response = await container.CreateItemAsync(item, ResolvePartitionKey(item)).ConfigureAwait(false);
             return IdProperty.GetValue(response.Resource)?.ToString();
         }
 
@@ -222,7 +298,7 @@ namespace Infrastructure.Data.CosmosDb
         /// </summary>
         protected virtual async Task ReplaceItemInternalAsync(TEntity item, string id)
         {
-            await container.ReplaceItemAsync(item, id, ResolvePartitionKey(id));
+            await container.ReplaceItemAsync(item, id, ResolvePartitionKey(item)).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -238,7 +314,7 @@ namespace Infrastructure.Data.CosmosDb
         /// </summary>
         /// <exception cref="InvalidOperationException">
         /// Thrown when <typeparamref name="TEntity"/> does not expose an <c>Id</c> or <c>id</c> property,
-        /// or when the property value is null.
+        /// when the property value is null, or when the partition key path resolves to a null value on the entity.
         /// </exception>
         public virtual async Task DeleteBy(TEntity entity)
         {
@@ -247,15 +323,27 @@ namespace Infrastructure.Data.CosmosDb
             var id = IdProperty.GetValue(entity)?.ToString();
             if (id == null)
                 throw new InvalidOperationException($"The Id property of {typeof(TEntity).Name} cannot be null.");
-            await DeleteItemInternalAsync(id);
+            await DeleteItemInternalAsync(entity, id);
         }
 
         /// <summary>
-        /// Core delete operation. Override to customize deletion behavior.
+        /// Core delete operation by id. Called by <see cref="DeleteBy(dynamic)"/>.
+        /// Override to customize deletion behavior for id-based deletes.
         /// </summary>
         protected virtual async Task DeleteItemInternalAsync(string id)
         {
-            await container.DeleteItemAsync<TEntity>(id, ResolvePartitionKey(id));
+            await container.DeleteItemAsync<TEntity>(id, ResolvePartitionKey(id)).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Core delete operation using the entity for partition key resolution. Called by <see cref="DeleteBy(TEntity)"/>.
+        /// Override to customize deletion behavior for entity-based deletes. If you previously overrode
+        /// <see cref="DeleteItemInternalAsync(string)"/> for custom deletion logic (audit, soft-delete, etc.),
+        /// override this method as well so that <see cref="DeleteBy(TEntity)"/> also goes through your custom logic.
+        /// </summary>
+        protected virtual async Task DeleteItemInternalAsync(TEntity entity, string id)
+        {
+            await container.DeleteItemAsync<TEntity>(id, ResolvePartitionKey(entity)).ConfigureAwait(false);
         }
 
         /// <summary>

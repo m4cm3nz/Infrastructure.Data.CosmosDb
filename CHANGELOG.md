@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.1.0] - 2026-06-12
+
+### Added
+- Entity-based partition key resolution — `Add`, `Update` and `DeleteBy(TEntity)` now resolve the partition key value from the entity at runtime via reflection on the configured `Settings.PartitionKey` path. Supports both slash notation (`/Header/VersionCode`) and dot notation (`/Header.VersionCode`). Property lookup is case-insensitive. This enables per-environment partition key strategies via `appsettings.json` with no code changes (e.g. no partition key in dev, `/Header.VersionCode` in staging/production).
+- `DeleteItemInternalAsync(TEntity entity, string id)` protected virtual overload — called by `DeleteBy(TEntity)`. Override alongside `DeleteItemInternalAsync(string id)` if you have custom deletion logic (audit, soft-delete, caching) that must apply to both delete paths.
+- Protected constructor `Repository(string partitionKeyPath)` for unit testing — validates the partition key path against the entity type without establishing a Cosmos DB connection.
+- `BuildPartitionKeyProperties` validates the configured partition key path against `TEntity` at construction time, throwing `ArgumentException` for invalid paths so misconfiguration is caught at startup rather than at runtime.
+
+### Changed
+- Partition key resolution for entity operations is now cached at construction time (`PropertyInfo[]`), matching the existing pattern for `IdProperty`. Reflection cost is paid once per instance rather than on every write operation.
+- `GetByID` and `DeleteBy(dynamic id)` continue to use the document id as the partition key value — the only viable fallback when the entity is not available.
+- `ReplaceItemAsync` now uses `ConfigureAwait(false)` consistently with all other async Cosmos DB calls.
+
+### Fixed
+- Partition key value for `Add`, `Update` and `DeleteBy(TEntity)` was always the document id, causing `400 Bad Request` or silent cross-partition operations when `Settings.PartitionKey` pointed to a field other than `id`.
+- `ToString()` on the resolved partition key value now uses `CultureInfo.InvariantCulture`, preventing culture-sensitive serialization differences for non-string partition key types (e.g. `int`, `DateTime`).
+- Null partition key value at runtime now throws `InvalidOperationException` with a descriptive message instead of silently sending `PartitionKey.None` to Cosmos DB.
+
+### Breaking changes
+- `DeleteBy(TEntity entity)` now dispatches to `DeleteItemInternalAsync(TEntity entity, string id)` instead of `DeleteItemInternalAsync(string id)`. Subclasses that override only the string-id overload for custom deletion logic will not have that override invoked when `DeleteBy(TEntity)` is called. Override the entity overload as well (or in addition) to restore the behavior.
+
 ## [10.0.0] - 2026-06-11
 
 ### Added

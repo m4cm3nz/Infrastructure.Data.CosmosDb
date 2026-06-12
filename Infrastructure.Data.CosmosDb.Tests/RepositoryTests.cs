@@ -8,6 +8,8 @@ using Xunit;
 
 namespace Infrastructure.Data.CosmosDb.Tests
 {
+    // --- Entities ---
+
     public class FakeEntity
     {
         public string Id { get; set; }
@@ -20,6 +22,20 @@ namespace Infrastructure.Data.CosmosDb.Tests
         public string DocumentId { get; set; }
         public string Name { get; set; }
     }
+
+    public class FakeNestedHeader
+    {
+        public string VersionCode { get; set; }
+    }
+
+    public class FakeEntityWithNestedPk
+    {
+        public string Id { get; set; }
+        public FakeNestedHeader Header { get; set; }
+        public string Name { get; set; }
+    }
+
+    // --- Test repositories ---
 
     class TestRepository : Repository<FakeEntity>
     {
@@ -34,17 +50,12 @@ namespace Infrastructure.Data.CosmosDb.Tests
         }
 
         protected override Task<IEnumerable<FakeEntity>> QueryAllItemsInternalAsync()
-        {
-            return Task.FromResult<IEnumerable<FakeEntity>>(new List<FakeEntity>(store.Values));
-        }
+            => Task.FromResult<IEnumerable<FakeEntity>>(new List<FakeEntity>(store.Values));
 
         protected override Task<IEnumerable<FakeEntity>> QueryItemsInternalAsync(System.Linq.Expressions.Expression<Func<FakeEntity, bool>> predicate)
         {
             var func = predicate.Compile();
-            var list = new List<FakeEntity>();
-            foreach (var v in store.Values)
-                if (func(v)) list.Add(v);
-            return Task.FromResult((IEnumerable<FakeEntity>)list);
+            return Task.FromResult(store.Values.Where(func));
         }
 
         protected override Task<dynamic> CreateItemInternalAsync(FakeEntity item)
@@ -61,6 +72,12 @@ namespace Infrastructure.Data.CosmosDb.Tests
         }
 
         protected override Task DeleteItemInternalAsync(string id)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+
+        protected override Task DeleteItemInternalAsync(FakeEntity entity, string id)
         {
             store.Remove(id);
             return Task.CompletedTask;
@@ -91,7 +108,86 @@ namespace Infrastructure.Data.CosmosDb.Tests
             store.Remove(id);
             return Task.CompletedTask;
         }
+
+        protected override Task DeleteItemInternalAsync(FakeEntityWithJsonProperty entity, string id)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
     }
+
+    /// <summary>
+    /// Tracks which overload was called to verify dispatch behavior.
+    /// </summary>
+    class TrackingRepository : Repository<FakeEntity>
+    {
+        private readonly Dictionary<string, FakeEntity> store = new();
+        public bool StringOverloadCalled { get; private set; }
+        public bool EntityOverloadCalled { get; private set; }
+
+        public TrackingRepository() : base() { }
+
+        protected override Task<dynamic> CreateItemInternalAsync(FakeEntity item)
+        {
+            if (string.IsNullOrEmpty(item.Id)) item.Id = Guid.NewGuid().ToString();
+            store[item.Id] = item;
+            return Task.FromResult<object>(item.Id);
+        }
+
+        protected override Task<FakeEntity> ReadItemInternalAsync(string id)
+        {
+            store.TryGetValue(id, out var v);
+            return Task.FromResult(v);
+        }
+
+        protected override Task DeleteItemInternalAsync(string id)
+        {
+            StringOverloadCalled = true;
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+
+        protected override Task DeleteItemInternalAsync(FakeEntity entity, string id)
+        {
+            EntityOverloadCalled = true;
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+    }
+
+    class TestRepositoryWithNestedPk : Repository<FakeEntityWithNestedPk>
+    {
+        private readonly Dictionary<string, FakeEntityWithNestedPk> store = new();
+
+        public TestRepositoryWithNestedPk() : base("/Header.VersionCode") { }
+
+        protected override Task<FakeEntityWithNestedPk> ReadItemInternalAsync(string id)
+        {
+            store.TryGetValue(id, out var v);
+            return Task.FromResult(v);
+        }
+
+        protected override Task<dynamic> CreateItemInternalAsync(FakeEntityWithNestedPk item)
+        {
+            if (string.IsNullOrEmpty(item.Id)) item.Id = Guid.NewGuid().ToString();
+            store[item.Id] = item;
+            return Task.FromResult<object>(item.Id);
+        }
+
+        protected override Task DeleteItemInternalAsync(string id)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+
+        protected override Task DeleteItemInternalAsync(FakeEntityWithNestedPk entity, string id)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+    }
+
+    // --- Tests ---
 
     public class RepositoryTests
     {
@@ -194,5 +290,72 @@ namespace Infrastructure.Data.CosmosDb.Tests
             var results = await repo.GetAll(x => x.Name == "a");
             Assert.Single(results);
         }
+
+        // --- Partition key dispatch tests ---
+
+        [Fact]
+        public async Task DeleteBy_Id_Calls_StringId_Overload()
+        {
+            var repo = new TrackingRepository();
+            var entity = new FakeEntity { Name = "test" };
+            var id = await repo.Add(entity);
+
+            await repo.DeleteBy(id);
+
+            Assert.True(repo.StringOverloadCalled);
+            Assert.False(repo.EntityOverloadCalled);
+        }
+
+        [Fact]
+        public async Task DeleteBy_Entity_Calls_Entity_Overload()
+        {
+            var repo = new TrackingRepository();
+            var entity = new FakeEntity { Name = "test" };
+            await repo.Add(entity);
+
+            await repo.DeleteBy(entity);
+
+            Assert.True(repo.EntityOverloadCalled);
+            Assert.False(repo.StringOverloadCalled);
+        }
+
+        // --- Partition key path validation tests ---
+
+        [Fact]
+        public void Constructor_WithInvalidPartitionKeyPath_ThrowsArgumentException()
+        {
+            Assert.Throws<ArgumentException>(() => new InvalidPkPathRepository());
+        }
+
+        [Fact]
+        public void Constructor_WithValidNestedPartitionKeyPath_DoesNotThrow()
+        {
+            var repo = new TestRepositoryWithNestedPk();
+            Assert.NotNull(repo);
+        }
+
+        [Fact]
+        public async Task Add_And_Delete_WithNestedPartitionKey_Should_Work()
+        {
+            var repo = new TestRepositoryWithNestedPk();
+            var entity = new FakeEntityWithNestedPk
+            {
+                Name = "test",
+                Header = new FakeNestedHeader { VersionCode = "v1" }
+            };
+
+            var id = await repo.Add(entity);
+            Assert.NotNull(id);
+
+            await repo.DeleteBy(entity);
+            var fetched = await repo.GetByID(entity.Id);
+            Assert.Null(fetched);
+        }
+    }
+
+    // Intentionally broken: Header exists but VersionCode.NonExistent does not.
+    class InvalidPkPathRepository : Repository<FakeEntityWithNestedPk>
+    {
+        public InvalidPkPathRepository() : base("/Header.NonExistent") { }
     }
 }

@@ -9,7 +9,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageReleaseNotes>Migrated from deprecated DocumentDB SDK to Microsoft.Azure.Cosmos v3; upgraded to .NET 10.0; added CosmosClient injection support; added XML documentation; improved test infrastructure with overridable protected methods.</PackageReleaseNotes>
+		<PackageReleaseNotes>Partition key value for Add, Update and DeleteBy(entity) is now resolved from the entity via reflection using the configured PartitionKey path — enables per-environment partition key strategy via appsettings without code changes.</PackageReleaseNotes>
 		<PackageTags>azure cosmosdb repository pattern data-access dotnet</PackageTags>
 		<RepositoryType>git</RepositoryType>
 		<NeutralLanguage>en-US</NeutralLanguage>
@@ -17,9 +17,9 @@
 		<PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
-		<AssemblyVersion>10.0.0.0</AssemblyVersion>
-		<Version>10.0.0</Version>
-		<FileVersion>10.0.0.0</FileVersion>
+		<AssemblyVersion>10.1.0.0</AssemblyVersion>
+		<Version>10.1.0</Version>
+		<FileVersion>10.1.0.0</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
