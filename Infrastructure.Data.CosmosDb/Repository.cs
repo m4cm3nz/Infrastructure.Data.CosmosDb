@@ -39,9 +39,14 @@ namespace Infrastructure.Data.CosmosDb
         private readonly CosmosClient client;
         private readonly Container container;
 
-        // Used by GetByID and DeleteBy(id) — only viable when PK path == id path.
-        private PartitionKey ResolvePartitionKey(string id) =>
-            partitionKeyProperties == null ? PartitionKey.None : new PartitionKey(id);
+        private PartitionKey ResolvePartitionKey()
+        {
+            if (partitionKeyProperties == null)
+                return PartitionKey.None;
+            throw new InvalidOperationException(
+                $"Partition key path '{partitionKey}' requires the key value to be provided explicitly. " +
+                $"Use GetByID(id, partitionKeyValue), FindByID(id, partitionKeyValue), or DeleteBy(id, partitionKeyValue).");
+        }
 
         // Used by Add, Update, DeleteBy(entity) — resolves the PK value from the entity via cached reflection.
         private PartitionKey ResolvePartitionKey(TEntity entity)
@@ -58,7 +63,17 @@ namespace Infrastructure.Data.CosmosDb
                         $"Partition key path '{partitionKey}' resolved to null on property '{prop.Name}'. " +
                         $"Ensure the entity is fully populated before calling this operation.");
             }
-            return new PartitionKey(Convert.ToString(current, CultureInfo.InvariantCulture));
+            return current switch
+            {
+                string s  => new PartitionKey(s),
+                bool b    => new PartitionKey(b),
+                double d  => new PartitionKey(d),
+                float f   => new PartitionKey((double)f),
+                int i     => new PartitionKey((double)i),
+                long l    => new PartitionKey((double)l),
+                decimal m => new PartitionKey((double)m),
+                _         => new PartitionKey(Convert.ToString(current, CultureInfo.InvariantCulture))
+            };
         }
 
         /// <summary>
@@ -179,9 +194,8 @@ namespace Infrastructure.Data.CosmosDb
 
         /// <summary>
         /// Returns the entity with the given id, or <c>null</c> if not found.
-        /// Assumes the partition key value equals the document id — only reliable when
-        /// <c>Settings.PartitionKey</c> points to the id field. For other partition key strategies,
-        /// use <see cref="GetAll(Expression{Func{TEntity, bool}})"/> to query by the partition key field.
+        /// Only valid for containers without a configured partition key (<c>PartitionKey.None</c>).
+        /// For any container with a partition key, use <see cref="GetByID(string, string)"/> instead.
         /// </summary>
         public virtual async Task<TEntity> GetByID(dynamic id)
         {
@@ -189,13 +203,29 @@ namespace Infrastructure.Data.CosmosDb
         }
 
         /// <summary>
-        /// Core read operation. Override to customize read behavior (e.g. caching).
+        /// Returns the entity identified by <paramref name="id"/> and <paramref name="partitionKeyValue"/>,
+        /// or <c>null</c> if not found. Use this overload for any container with a configured partition key.
+        /// </summary>
+        public virtual async Task<TEntity> GetByID(string id, string partitionKeyValue)
+        {
+            ArgumentNullException.ThrowIfNull(partitionKeyValue);
+            return await ReadItemInternalAsync(id, new PartitionKey(partitionKeyValue));
+        }
+
+        /// <summary>
+        /// Core read operation by id only. Valid when no partition key is configured; throws otherwise.
         /// </summary>
         protected virtual async Task<TEntity> ReadItemInternalAsync(string id)
+            => await ReadItemInternalAsync(id, ResolvePartitionKey());
+
+        /// <summary>
+        /// Core read operation with explicit partition key. Override to customize read behavior (e.g. caching).
+        /// </summary>
+        protected virtual async Task<TEntity> ReadItemInternalAsync(string id, PartitionKey partitionKey)
         {
             try
             {
-                var response = await container.ReadItemAsync<TEntity>(id, ResolvePartitionKey(id));
+                var response = await container.ReadItemAsync<TEntity>(id, partitionKey);
                 return response.Resource;
             }
             catch (CosmosException e)
@@ -281,8 +311,8 @@ namespace Infrastructure.Data.CosmosDb
                 IdProperty.SetValue(item, id);
             }
 
-            var response = await container.CreateItemAsync(item, ResolvePartitionKey(item)).ConfigureAwait(false);
-            return IdProperty.GetValue(response.Resource)?.ToString();
+            await container.CreateItemAsync(item, ResolvePartitionKey(item)).ConfigureAwait(false);
+            return id;
         }
 
         /// <summary>
@@ -303,10 +333,22 @@ namespace Infrastructure.Data.CosmosDb
 
         /// <summary>
         /// Deletes the entity with the given id.
+        /// Only valid for containers without a configured partition key (<c>PartitionKey.None</c>).
+        /// For any container with a partition key, use <see cref="DeleteBy(string, string)"/> instead.
         /// </summary>
         public virtual async Task DeleteBy(dynamic id)
         {
             await DeleteItemInternalAsync(id.ToString());
+        }
+
+        /// <summary>
+        /// Deletes the entity identified by <paramref name="id"/> and <paramref name="partitionKeyValue"/>.
+        /// Use this overload for any container with a configured partition key.
+        /// </summary>
+        public virtual async Task DeleteBy(string id, string partitionKeyValue)
+        {
+            ArgumentNullException.ThrowIfNull(partitionKeyValue);
+            await DeleteItemInternalAsync(id, new PartitionKey(partitionKeyValue));
         }
 
         /// <summary>
@@ -327,18 +369,26 @@ namespace Infrastructure.Data.CosmosDb
         }
 
         /// <summary>
-        /// Core delete operation by id. Called by <see cref="DeleteBy(dynamic)"/>.
-        /// Override to customize deletion behavior for id-based deletes.
+        /// Core delete operation by id only. Valid when no partition key is configured; throws otherwise.
         /// </summary>
         protected virtual async Task DeleteItemInternalAsync(string id)
+            => await DeleteItemInternalAsync(id, ResolvePartitionKey());
+
+        /// <summary>
+        /// Core delete operation with explicit partition key. Called by <see cref="DeleteBy(string, string)"/>.
+        /// Override to customize deletion behavior for id-based deletes. If you previously overrode
+        /// <see cref="DeleteItemInternalAsync(string)"/> for custom deletion logic (audit, soft-delete, etc.),
+        /// override this method as well so that <see cref="DeleteBy(string, string)"/> also goes through your custom logic.
+        /// </summary>
+        protected virtual async Task DeleteItemInternalAsync(string id, PartitionKey partitionKey)
         {
-            await container.DeleteItemAsync<TEntity>(id, ResolvePartitionKey(id)).ConfigureAwait(false);
+            await container.DeleteItemAsync<TEntity>(id, partitionKey).ConfigureAwait(false);
         }
 
         /// <summary>
         /// Core delete operation using the entity for partition key resolution. Called by <see cref="DeleteBy(TEntity)"/>.
         /// Override to customize deletion behavior for entity-based deletes. If you previously overrode
-        /// <see cref="DeleteItemInternalAsync(string)"/> for custom deletion logic (audit, soft-delete, etc.),
+        /// <see cref="DeleteItemInternalAsync(string, PartitionKey)"/> for custom deletion logic (audit, soft-delete, etc.),
         /// override this method as well so that <see cref="DeleteBy(TEntity)"/> also goes through your custom logic.
         /// </summary>
         protected virtual async Task DeleteItemInternalAsync(TEntity entity, string id)
@@ -348,10 +398,22 @@ namespace Infrastructure.Data.CosmosDb
 
         /// <summary>
         /// Returns <c>true</c> if an entity with the given id exists.
+        /// Only valid for containers without a configured partition key (<c>PartitionKey.None</c>).
+        /// For any container with a partition key, use <see cref="FindByID(string, string)"/> instead.
         /// </summary>
         public virtual async Task<bool> FindByID(dynamic identity)
         {
             return (await GetByID(identity)) != null;
+        }
+
+        /// <summary>
+        /// Returns <c>true</c> if an entity with the given <paramref name="id"/> and
+        /// <paramref name="partitionKeyValue"/> exists. Use this overload for any container
+        /// with a configured partition key.
+        /// </summary>
+        public virtual async Task<bool> FindByID(string id, string partitionKeyValue)
+        {
+            return (await GetByID(id, partitionKeyValue)) != null;
         }
     }
 }

@@ -91,10 +91,11 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
             var repo = CreateOrderRepo();
             var entity = new OrderEntity { CustomerName = "Cliente Teste", Total = 99.99m };
 
-            var id = await repo.Add(entity);
+            var id = (string)await repo.Add(entity);
             Assert.NotNull(id);
 
-            var fetched = await repo.GetByID(id);
+            // OrderRepository uses PK=/id, so the partition key value equals the document id.
+            var fetched = await repo.GetByID(id, id);
             Assert.NotNull(fetched);
             Assert.Equal("Cliente Teste", fetched.CustomerName);
         }
@@ -106,12 +107,12 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
 
             var repo = CreateOrderRepo();
             var entity = new OrderEntity { CustomerName = "Original", Total = 10m };
-            var id = await repo.Add(entity);
+            var id = (string)await repo.Add(entity);
 
             entity.CustomerName = "Atualizado";
             await repo.Update(entity, id);
 
-            var fetched = await repo.GetByID(id);
+            var fetched = await repo.GetByID(id, id);
             Assert.Equal("Atualizado", fetched.CustomerName);
         }
 
@@ -122,11 +123,11 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
 
             var repo = CreateOrderRepo();
             var entity = new OrderEntity { CustomerName = "Para Deletar", Total = 1m };
-            var id = await repo.Add(entity);
+            var id = (string)await repo.Add(entity);
 
-            await repo.DeleteBy(id);
+            await repo.DeleteBy(id, id);
 
-            var fetched = await repo.GetByID(id);
+            var fetched = await repo.GetByID(id, id);
             Assert.Null(fetched);
         }
 
@@ -141,7 +142,7 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
 
             await repo.DeleteBy(entity);
 
-            var fetched = await repo.GetByID(entity.Id);
+            var fetched = await repo.GetByID(entity.Id, entity.Id);
             Assert.Null(fetched);
         }
 
@@ -152,10 +153,10 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
 
             var repo = CreateOrderRepo();
             var entity = new OrderEntity { CustomerName = "Existe", Total = 5m };
-            var id = await repo.Add(entity);
+            var id = (string)await repo.Add(entity);
 
-            Assert.True(await repo.FindByID(id));
-            Assert.False(await repo.FindByID("nao-existe"));
+            Assert.True(await repo.FindByID(id, id));
+            Assert.False(await repo.FindByID("nao-existe", "nao-existe"));
         }
 
         [SkippableFact]
@@ -223,14 +224,57 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
             Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
 
             var repo = CreateTenantRepo();
-            var entity = new TenantEntity { TenantId = "tenant-a", Name = "Empresa A" };
+            var tenantId = $"tenant-{Guid.NewGuid():N}";
+            var entity = new TenantEntity { TenantId = tenantId, Name = "Empresa A" };
 
             var id = await repo.Add(entity);
             Assert.NotNull(id);
 
-            var results = await repo.GetAll(x => x.TenantId == "tenant-a");
+            var results = await repo.GetAll(x => x.TenantId == tenantId);
             Assert.Single(results);
             Assert.Equal("Empresa A", results.First().Name);
+        }
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_GetById_Should_Work()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantRepo();
+            var entity = new TenantEntity { TenantId = "tenant-getbyid", Name = "Point Read Test" };
+            var id = (string)await repo.Add(entity);
+
+            var fetched = await repo.GetByID(id, "tenant-getbyid");
+            Assert.NotNull(fetched);
+            Assert.Equal("Point Read Test", fetched.Name);
+        }
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_FindById_Should_Work()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantRepo();
+            var entity = new TenantEntity { TenantId = "tenant-findbyid", Name = "Exists Test" };
+            var id = (string)await repo.Add(entity);
+
+            Assert.True(await repo.FindByID(id, "tenant-findbyid"));
+            Assert.False(await repo.FindByID("nao-existe", "tenant-findbyid"));
+        }
+
+        [SkippableFact]
+        public async Task NonIdPartitionKey_DeleteBy_Id_Should_Remove()
+        {
+            Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
+
+            var repo = CreateTenantRepo();
+            var entity = new TenantEntity { TenantId = "tenant-deleteid", Name = "Para Deletar" };
+            var id = (string)await repo.Add(entity);
+
+            await repo.DeleteBy(id, "tenant-deleteid");
+
+            var fetched = await repo.GetByID(id, "tenant-deleteid");
+            Assert.Null(fetched);
         }
 
         [SkippableFact]

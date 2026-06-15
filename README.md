@@ -135,7 +135,12 @@ public class OrderService
 
     public OrderService(OrderRepository repository) => _repository = repository;
 
-    public Task<Order> GetOrder(string id) => _repository.GetByID(id);
+    // When PartitionKey is "/id": the partition key value equals the document id.
+    public Task<Order> GetOrder(string id) => _repository.GetByID(id, id);
+
+    // When PartitionKey is "/customerId": supply the partition key value explicitly.
+    // public Task<Order> GetOrder(string id, string customerId)
+    //     => _repository.GetByID(id, customerId);
 
     public Task<IEnumerable<Order>> GetByCustomer(string customerId)
         => _repository.GetAll(o => o.CustomerId == customerId);
@@ -145,7 +150,8 @@ public class OrderService
 
     public Task UpdateOrder(Order order) => _repository.Update(order, order.Id);
 
-    public Task DeleteOrder(string id) => _repository.DeleteBy(id);
+    // When PartitionKey is "/id": the partition key value equals the document id.
+    public Task DeleteOrder(string id) => _repository.DeleteBy(id, id);
 }
 ```
 
@@ -155,12 +161,15 @@ All data access operations are delegated to `protected virtual` methods, making 
 
 | Public method | Protected override |
 |---|---|
-| `GetByID` | `ReadItemInternalAsync` |
+| `GetByID(dynamic id)` | `ReadItemInternalAsync(string id)` — only for containers without a partition key |
+| `GetByID(string id, string pk)` | `ReadItemInternalAsync(string id, PartitionKey pk)` |
 | `GetAll()` | `QueryAllItemsInternalAsync` |
 | `GetAll(predicate)` | `QueryItemsInternalAsync` |
 | `Add` | `CreateItemInternalAsync` |
 | `Update` | `ReplaceItemInternalAsync` |
-| `DeleteBy(id)` | `DeleteItemInternalAsync` |
+| `DeleteBy(dynamic id)` | `DeleteItemInternalAsync(string id)` — only for containers without a partition key |
+| `DeleteBy(string id, string pk)` | `DeleteItemInternalAsync(string id, PartitionKey pk)` |
+| `DeleteBy(TEntity entity)` | `DeleteItemInternalAsync(TEntity entity, string id)` |
 
 ```csharp
 public class CachedOrderRepository : Repository<Order>
@@ -170,9 +179,10 @@ public class CachedOrderRepository : Repository<Order>
     public CachedOrderRepository(CosmosClient client, IOptions<Settings> options, IMemoryCache cache)
         : base(client, options) => _cache = cache;
 
-    protected override async Task<Order> ReadItemInternalAsync(string id)
+    // Called by GetByID(string id, string partitionKeyValue).
+    protected override async Task<Order> ReadItemInternalAsync(string id, PartitionKey partitionKey)
     {
-        return await _cache.GetOrCreateAsync(id, _ => base.ReadItemInternalAsync(id));
+        return await _cache.GetOrCreateAsync(id, _ => base.ReadItemInternalAsync(id, partitionKey));
     }
 }
 ```
@@ -194,6 +204,13 @@ class TestOrderRepository : Repository<Order>
         return Task.FromResult(item);
     }
 
+    // Called by GetByID(string id, string partitionKeyValue).
+    protected override Task<Order> ReadItemInternalAsync(string id, PartitionKey partitionKey)
+    {
+        _store.TryGetValue(id, out var item);
+        return Task.FromResult(item);
+    }
+
     protected override Task<dynamic> CreateItemInternalAsync(Order item)
     {
         if (string.IsNullOrEmpty(item.Id)) item.Id = Guid.NewGuid().ToString();
@@ -202,6 +219,19 @@ class TestOrderRepository : Repository<Order>
     }
 
     protected override Task DeleteItemInternalAsync(string id)
+    {
+        _store.Remove(id);
+        return Task.CompletedTask;
+    }
+
+    // Called by DeleteBy(string id, string partitionKeyValue).
+    protected override Task DeleteItemInternalAsync(string id, PartitionKey partitionKey)
+    {
+        _store.Remove(id);
+        return Task.CompletedTask;
+    }
+
+    protected override Task DeleteItemInternalAsync(Order entity, string id)
     {
         _store.Remove(id);
         return Task.CompletedTask;
@@ -244,7 +274,9 @@ dotnet test Infrastructure.Data.CosmosDb.IntegrationTests
 - The database and container are created automatically on first use if they do not exist.
 - Default container throughput is **1000 RU/s**. Override `CreateCollectionIfNotExistsAsync` to customize.
 - `Add` generates a GUID id if the entity's id property is null or empty.
-- The partition key **value** for `Add`, `Update` and `DeleteBy(entity)` is resolved automatically from the entity via reflection on the configured `PartitionKey` path. Supports slash notation (`/Header/VersionCode`) and dot notation (`/Header.VersionCode`). Property lookup is case-insensitive. The path is validated against the entity type at construction time — an invalid path throws `ArgumentException` at startup. A null value at runtime throws `InvalidOperationException` with a descriptive message. `GetByID` and `DeleteBy(id)` fall back to using the document id as the partition key value.
-- If you override `DeleteItemInternalAsync(string id)` for custom deletion logic (audit, soft-delete, etc.), also override `DeleteItemInternalAsync(TEntity entity, string id)` — `DeleteBy(TEntity)` dispatches to the entity overload, not the string-id overload.
+- The partition key **value** for `Add`, `Update` and `DeleteBy(entity)` is resolved automatically from the entity via reflection on the configured `PartitionKey` path. Both slash notation (e.g. `/tenantId` or `/address/city`) and dot notation (e.g. `/address.city`) are supported. Property lookup is case-insensitive. The path is validated against the entity type at construction time — an invalid path throws `ArgumentException` at startup. A null value at runtime throws `InvalidOperationException` with a descriptive message.
+- For point reads and id-based deletes, the partition key value must be supplied explicitly via `GetByID(id, partitionKeyValue)`, `FindByID(id, partitionKeyValue)` and `DeleteBy(id, partitionKeyValue)`. The single-argument overloads (`GetByID(dynamic id)`, etc.) throw `InvalidOperationException` when a partition key is configured — they are only valid for containers without a partition key.
+- Partition key properties of type `bool`, `int`, `long`, `float`, `double` or `decimal` are mapped to the correct Cosmos DB native type — `bool` uses `PartitionKey(bool)`, numeric types use `PartitionKey(double)`. String properties always use `PartitionKey(string)`.
+- If you override `DeleteItemInternalAsync(string id)` or `DeleteItemInternalAsync(string id, PartitionKey partitionKey)` for custom deletion logic (audit, soft-delete, etc.), also override `DeleteItemInternalAsync(TEntity entity, string id)` — `DeleteBy(TEntity)` dispatches to the entity overload.
 - `Add` returns `dynamic` (interface contract) — call `.ToString()` to get the id as a string.
 - Entities must expose a string property that resolves to the Cosmos DB document `id` — either named `Id`, `id`, or decorated with `[JsonPropertyName("id")]`. If none is found, `Add` and `DeleteBy(entity)` throw `InvalidOperationException`.
