@@ -9,7 +9,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageReleaseNotes>Partition key value for Add, Update and DeleteBy(entity) is now resolved from the entity via reflection using the configured PartitionKey path — enables per-environment partition key strategy via appsettings without code changes.</PackageReleaseNotes>
+		<PackageReleaseNotes>Adds GetByID(id, partitionKeyValue), FindByID(id, partitionKeyValue) and DeleteBy(id, partitionKeyValue) overloads for correct point-reads and deletes on partitioned containers. Single-argument overloads now throw when a partition key is configured. Non-string partition key properties (bool, int, long, double) are now routed to the correct PartitionKey constructor type.</PackageReleaseNotes>
 		<PackageTags>azure cosmosdb repository pattern data-access dotnet</PackageTags>
 		<RepositoryType>git</RepositoryType>
 		<NeutralLanguage>en-US</NeutralLanguage>
@@ -17,9 +17,9 @@
 		<PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
-		<AssemblyVersion>10.1.0.0</AssemblyVersion>
-		<Version>10.1.0</Version>
-		<FileVersion>10.1.0.0</FileVersion>
+		<AssemblyVersion>10.2.0.0</AssemblyVersion>
+		<Version>10.2.0</Version>
+		<FileVersion>10.2.0.0</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>

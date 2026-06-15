@@ -5,10 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.2.0] - 2026-06-15
+
+### Added
+- `GetByID(string id, string partitionKeyValue)` — point-read with explicit partition key value. Use whenever the container has a configured partition key.
+- `FindByID(string id, string partitionKeyValue)` — existence check with explicit partition key value.
+- `DeleteBy(string id, string partitionKeyValue)` — delete by id with explicit partition key value.
+- `ReadItemInternalAsync(string id, PartitionKey partitionKey)` protected virtual overload — primary override point for partition-key-aware reads (e.g. caching). Called by `GetByID(string, string)`.
+- `DeleteItemInternalAsync(string id, PartitionKey partitionKey)` protected virtual overload — primary override point for partition-key-aware deletes. Called by `DeleteBy(string, string)`. Override alongside `DeleteItemInternalAsync(TEntity entity, string id)` to apply custom logic (audit, soft-delete) to all delete paths.
+
+### Changed
+- `GetByID(dynamic id)`, `FindByID(dynamic id)` and `DeleteBy(dynamic id)` now throw `InvalidOperationException` when a partition key is configured. Use the new two-argument overloads instead.
+- Partition key resolution for non-string properties now routes to the correct `PartitionKey` constructor — `bool` uses `PartitionKey(bool)`, numeric types (`int`, `long`, `float`, `double`, `decimal`) use `PartitionKey(double)`. Previously all types were coerced to string via `Convert.ToString`, causing a type mismatch in Cosmos DB for non-string partition keys.
+- `GetByID(string, string)`, `FindByID(string, string)` and `DeleteBy(string, string)` throw `ArgumentNullException` immediately when `partitionKeyValue` is null.
+
+### Fixed
+- `CreateItemInternalAsync` now returns the locally-held id string directly instead of re-reading it from the Cosmos response via reflection — eliminates one redundant `PropertyInfo.GetValue` call per `Add` operation.
+
+### Breaking changes
+- `GetByID(dynamic id)`, `FindByID(dynamic id)` and `DeleteBy(dynamic id)` now throw `InvalidOperationException` for any container with a configured partition key (any non-empty `Settings.PartitionKey`). Switch to `GetByID(id, partitionKeyValue)`, `FindByID(id, partitionKeyValue)` and `DeleteBy(id, partitionKeyValue)`.
+- Subclasses that override `ReadItemInternalAsync(string id)` or `DeleteItemInternalAsync(string id)` for custom behavior (caching, audit) should also override the new `(string id, PartitionKey partitionKey)` overloads to apply that behavior to the new two-argument call paths.
+
 ## [10.1.0] - 2026-06-12
 
 ### Added
-- Entity-based partition key resolution — `Add`, `Update` and `DeleteBy(TEntity)` now resolve the partition key value from the entity at runtime via reflection on the configured `Settings.PartitionKey` path. Supports both slash notation (`/Header/VersionCode`) and dot notation (`/Header.VersionCode`). Property lookup is case-insensitive. This enables per-environment partition key strategies via `appsettings.json` with no code changes (e.g. no partition key in dev, `/Header.VersionCode` in staging/production).
+- Entity-based partition key resolution — `Add`, `Update` and `DeleteBy(TEntity)` now resolve the partition key value from the entity at runtime via reflection on the configured `Settings.PartitionKey` path. Both slash notation (e.g. `/tenantId`, `/address/city`) and dot notation (e.g. `/address.city`) are supported. Property lookup is case-insensitive. This enables per-environment partition key strategies via `appsettings.json` with no code changes (e.g. no partition key in dev, `/tenantId` in production).
 - `DeleteItemInternalAsync(TEntity entity, string id)` protected virtual overload — called by `DeleteBy(TEntity)`. Override alongside `DeleteItemInternalAsync(string id)` if you have custom deletion logic (audit, soft-delete, caching) that must apply to both delete paths.
 - Protected constructor `Repository(string partitionKeyPath)` for unit testing — validates the partition key path against the entity type without establishing a Cosmos DB connection.
 - `BuildPartitionKeyProperties` validates the configured partition key path against `TEntity` at construction time, throwing `ArgumentException` for invalid paths so misconfiguration is caught at startup rather than at runtime.
