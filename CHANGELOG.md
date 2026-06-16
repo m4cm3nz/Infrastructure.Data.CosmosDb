@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.2.1] - 2026-06-16
+
+### Fixed
+- `CreateCollectionIfNotExistsAsync` no longer throws `ArgumentException` when the container already exists with a partition key path different from the one in settings (or from the `/_partitionKey` fallback). The method now probes container existence via a metadata query before attempting creation, so any pre-existing container is accepted as-is regardless of its partition key path. Creation (only when the container is genuinely absent) still uses the atomic, race-safe `CreateContainerIfNotExistsAsync`.
+- Partition key path resolution no longer throws `ArgumentException` at startup when a path segment cannot be matched to a C# property on the entity type. Unresolvable paths now fall back silently to `PartitionKey.None`, restoring cross-partition behavior for containers whose configured path does not map directly to the C# model (e.g. containers created with a path that predates a model rename). Paths that do resolve — including via `[JsonPropertyName]` fallback introduced in v10.2.0 — continue to enable precise per-partition operations.
+
 ## [10.2.0] - 2026-06-15
 
 ### Added

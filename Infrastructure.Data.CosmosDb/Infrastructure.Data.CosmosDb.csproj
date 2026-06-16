@@ -9,7 +9,7 @@
 		<GenerateDocumentationFile>true</GenerateDocumentationFile>
 		<AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageReleaseNotes>Adds GetByID(id, partitionKeyValue), FindByID(id, partitionKeyValue) and DeleteBy(id, partitionKeyValue) overloads for correct point-reads and deletes on partitioned containers. Single-argument overloads now throw when a partition key is configured. Non-string partition key properties (bool, int, long, double) are now routed to the correct PartitionKey constructor type.</PackageReleaseNotes>
+		<PackageReleaseNotes>Container creation now reuses a pre-existing container regardless of its partition key path (no more ArgumentException on a mismatched path). Partition key path resolution falls back to PartitionKey.None when a path segment cannot be resolved against the entity, and matches [JsonPropertyName] before the C# property name.</PackageReleaseNotes>
 		<PackageTags>azure cosmosdb repository pattern data-access dotnet</PackageTags>
 		<RepositoryType>git</RepositoryType>
 		<NeutralLanguage>en-US</NeutralLanguage>
@@ -17,9 +17,9 @@
 		<PackageProjectUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</PackageProjectUrl>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb</RepositoryUrl>
-		<AssemblyVersion>10.2.0.0</AssemblyVersion>
-		<Version>10.2.0</Version>
-		<FileVersion>10.2.0.0</FileVersion>
+		<AssemblyVersion>10.2.1.0</AssemblyVersion>
+		<Version>10.2.1</Version>
+		<FileVersion>10.2.1.0</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
