@@ -36,6 +36,21 @@ namespace Infrastructure.Data.CosmosDb.Tests
         public string Name { get; set; }
     }
 
+    // A nested type whose C# property name differs from its JSON name.
+    public class FakeNestedHeaderWithJsonName
+    {
+        [JsonPropertyName("VersionCode")]
+        public string Code { get; set; }
+    }
+
+    public class FakeEntityWithJsonNamedNestedPk
+    {
+        public string Id { get; set; }
+        [JsonPropertyName("Header")]
+        public FakeNestedHeaderWithJsonName ResponseHeader { get; set; }
+        public string Name { get; set; }
+    }
+
     // --- Test repositories ---
 
     class TestRepository : Repository<FakeEntity>
@@ -395,9 +410,11 @@ namespace Infrastructure.Data.CosmosDb.Tests
         // --- Partition key path validation tests ---
 
         [Fact]
-        public void Constructor_WithInvalidPartitionKeyPath_ThrowsArgumentException()
+        public void Constructor_WithInvalidPartitionKeyPath_DoesNotThrow()
         {
-            Assert.Throws<ArgumentException>(() => new InvalidPkPathRepository());
+            // Unresolvable path falls back to PartitionKey.None — not a hard error.
+            var repo = new InvalidPkPathRepository();
+            Assert.NotNull(repo);
         }
 
         [Fact]
@@ -476,6 +493,31 @@ namespace Infrastructure.Data.CosmosDb.Tests
             Assert.False(repo.EntityOverloadCalled);
         }
 
+        // --- JsonPropertyName fallback in partition key path resolution ---
+
+        [Fact]
+        public void Constructor_WithJsonPropertyNamedPartitionKey_DoesNotThrow()
+        {
+            var repo = new TestRepositoryWithJsonNamedNestedPk();
+            Assert.NotNull(repo);
+        }
+
+        [Fact]
+        public async Task Add_WithJsonPropertyNamedPartitionKey_ResolvesKeyFromEntity()
+        {
+            var repo = new TestRepositoryWithJsonNamedNestedPk();
+            var entity = new FakeEntityWithJsonNamedNestedPk
+            {
+                Name = "test",
+                ResponseHeader = new FakeNestedHeaderWithJsonName { Code = "v2" }
+            };
+
+            var id = await repo.Add(entity);
+            var fetched = await repo.GetByID((string)id, "v2");
+            Assert.NotNull(fetched);
+            Assert.Equal("test", fetched.Name);
+        }
+
         // --- Legacy path throws when PK is configured ---
 
         [Fact]
@@ -497,5 +539,38 @@ namespace Infrastructure.Data.CosmosDb.Tests
     class InvalidPkPathRepository : Repository<FakeEntityWithNestedPk>
     {
         public InvalidPkPathRepository() : base("/Header.NonExistent") { }
+    }
+
+    class TestRepositoryWithJsonNamedNestedPk : Repository<FakeEntityWithJsonNamedNestedPk>
+    {
+        private readonly Dictionary<string, FakeEntityWithJsonNamedNestedPk> store = new();
+
+        // Path uses JSON property names: Header (mapped via [JsonPropertyName]) and VersionCode (also via [JsonPropertyName])
+        public TestRepositoryWithJsonNamedNestedPk() : base("/Header.VersionCode") { }
+
+        protected override Task<FakeEntityWithJsonNamedNestedPk> ReadItemInternalAsync(string id, PartitionKey partitionKey)
+        {
+            store.TryGetValue(id, out var v);
+            return Task.FromResult(v);
+        }
+
+        protected override Task<dynamic> CreateItemInternalAsync(FakeEntityWithJsonNamedNestedPk item)
+        {
+            if (string.IsNullOrEmpty(item.Id)) item.Id = Guid.NewGuid().ToString();
+            store[item.Id] = item;
+            return Task.FromResult<dynamic>(item.Id);
+        }
+
+        protected override Task DeleteItemInternalAsync(FakeEntityWithJsonNamedNestedPk entity, string id)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
+
+        protected override Task DeleteItemInternalAsync(string id, PartitionKey partitionKey)
+        {
+            store.Remove(id);
+            return Task.CompletedTask;
+        }
     }
 }

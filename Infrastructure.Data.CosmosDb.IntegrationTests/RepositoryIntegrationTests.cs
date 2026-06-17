@@ -321,12 +321,13 @@ namespace Infrastructure.Data.CosmosDb.IntegrationTests
         }
 
         [SkippableFact]
-        public void InvalidPartitionKeyPath_Should_ThrowArgumentException_AtConstruction()
+        public void InvalidPartitionKeyPath_DoesNotThrow_FallsBackToPartitionKeyNone()
         {
             Skip.IfNot(fixture.IsAvailable, fixture.LastError ?? CosmosEmulatorFixture.SkipReason);
 
-            Assert.Throws<ArgumentException>(() =>
-                new OrderRepository(fixture.Client, fixture.CreateOptions("Orders", "/NonExistentProperty")));
+            // An unresolvable path is not a hard error — it falls back to PartitionKey.None.
+            var repo = new OrderRepository(fixture.Client, fixture.CreateOptions("Orders", "/NonExistentProperty"));
+            Assert.NotNull(repo);
         }
     }
 }

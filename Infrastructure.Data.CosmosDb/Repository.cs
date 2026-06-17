@@ -79,12 +79,11 @@ namespace Infrastructure.Data.CosmosDb
         /// <summary>
         /// Resolves and caches the <see cref="PropertyInfo"/> chain for a partition key path.
         /// Supports both slash notation (<c>/Header/VersionCode</c>) and dot notation (<c>/Header.VersionCode</c>).
-        /// Property lookup is case-insensitive. Returns <c>null</c> when <paramref name="path"/> is empty.
+        /// Each segment is matched against <c>[JsonPropertyName]</c> first (the path is a JSON path), then
+        /// against the C# property name case-insensitively. Returns <c>null</c> when <paramref name="path"/>
+        /// is empty <em>or</em> when a segment cannot be resolved — in the latter case operations fall back
+        /// to <see cref="PartitionKey.None"/> (cross-partition) rather than failing.
         /// </summary>
-        /// <exception cref="ArgumentException">
-        /// Thrown when any segment of <paramref name="path"/> does not match a public property on the
-        /// expected type, allowing misconfigured paths to be caught at startup.
-        /// </exception>
         private static PropertyInfo[] BuildPartitionKeyProperties(Type entityType, string path)
         {
             if (string.IsNullOrEmpty(path))
@@ -95,13 +94,16 @@ namespace Infrastructure.Data.CosmosDb
             var currentType = entityType;
             for (int i = 0; i < segments.Length; i++)
             {
-                var prop = currentType.GetProperty(segments[i],
-                    BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
+                // The path uses JSON names, so [JsonPropertyName] takes precedence over the C# name.
+                var prop = currentType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                        .FirstOrDefault(p => string.Equals(
+                            p.GetCustomAttribute<System.Text.Json.Serialization.JsonPropertyNameAttribute>()?.Name,
+                            segments[i],
+                            StringComparison.OrdinalIgnoreCase))
+                    ?? currentType.GetProperty(segments[i],
+                        BindingFlags.IgnoreCase | BindingFlags.Public | BindingFlags.Instance);
                 if (prop == null)
-                    throw new ArgumentException(
-                        $"Property '{segments[i]}' not found on type '{currentType.Name}' " +
-                        $"for partition key path '{path}'.",
-                        nameof(path));
+                    return null;
                 props[i] = prop;
                 currentType = prop.PropertyType;
             }
@@ -123,14 +125,12 @@ namespace Infrastructure.Data.CosmosDb
         protected Repository() { }
 
         /// <summary>
-        /// Protected constructor for unit testing with a partition key path. Validates the path
+        /// Protected constructor for unit testing with a partition key path. Resolves the path
         /// against <typeparamref name="TEntity"/> at construction time but does not establish
-        /// a Cosmos DB connection. Override the protected internal methods to provide a test-friendly data store.
+        /// a Cosmos DB connection. A path whose segments cannot be resolved falls back to
+        /// <see cref="PartitionKey.None"/> (cross-partition). Override the protected internal
+        /// methods to provide a test-friendly data store.
         /// </summary>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="partitionKeyPath"/> contains a segment that does not match
-        /// any public property on <typeparamref name="TEntity"/> or its nested types.
-        /// </exception>
         protected Repository(string partitionKeyPath)
         {
             partitionKey = partitionKeyPath;
@@ -151,11 +151,9 @@ namespace Infrastructure.Data.CosmosDb
         /// <summary>
         /// Initializes the repository using a shared <see cref="CosmosClient"/> instance,
         /// overriding both the collection id and partition key defined in configuration.
+        /// A partition key path whose segments cannot be resolved against <typeparamref name="TEntity"/>
+        /// falls back to <see cref="PartitionKey.None"/> (cross-partition).
         /// </summary>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="partitionKey"/> contains a segment that does not match
-        /// any public property on <typeparamref name="TEntity"/> or its nested types.
-        /// </exception>
         public Repository(CosmosClient cosmosClient, IOptions<Settings> options, string collectionId, string partitionKey)
         {
             DatabaseId = options.Value.DatabaseId;
@@ -188,8 +186,21 @@ namespace Infrastructure.Data.CosmosDb
         protected virtual async Task CreateCollectionIfNotExistsAsync()
         {
             var database = client.GetDatabase(DatabaseId);
+
+            // Probe existence via a metadata query so an existing container is reused as-is,
+            // regardless of its partition key. A FeedIterator may return an empty page while
+            // more results remain, so every page must be drained before concluding absence.
+            var iterator = database.GetContainerQueryIterator<ContainerProperties>(
+                new QueryDefinition("SELECT * FROM c WHERE c.id = @id").WithParameter("@id", CollectionId));
+            while (iterator.HasMoreResults)
+            {
+                if ((await iterator.ReadNextAsync().ConfigureAwait(false)).Any())
+                    return;
+            }
+
             var pk = string.IsNullOrEmpty(partitionKey) ? "/_partitionKey" : partitionKey;
-            await database.CreateContainerIfNotExistsAsync(new ContainerProperties(CollectionId, pk), throughput: 1000).ConfigureAwait(false);
+            await database.CreateContainerIfNotExistsAsync(
+                new ContainerProperties(CollectionId, pk), throughput: 1000).ConfigureAwait(false);
         }
 
         /// <summary>
