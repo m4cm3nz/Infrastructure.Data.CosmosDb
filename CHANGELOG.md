@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Integration test fixture (`CosmosEmulatorFixture`) now probes the emulator gateway port and, once it is open, polls `ReadAccountAsync` for up to ~90 s before declaring the emulator unavailable. This lets the suite be run immediately after starting the emulator (no manual warm-up wait), while still skipping fast when no emulator is listening. Test-infrastructure only — no change to the published library.
+
 ## [10.2.1] - 2026-06-16
 
 ### Fixed
