@@ -1,5 +1,7 @@
 # Infrastructure.Data.CosmosDb
 
+[![CI](https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb/actions/workflows/ci.yml/badge.svg)](https://github.com/m4cm3nz/Infrastructure.Data.CosmosDb/actions/workflows/ci.yml)
+
 A .NET 10.0 generic repository base class for Azure Cosmos DB, built on the [Microsoft.Azure.Cosmos](https://www.nuget.org/packages/Microsoft.Azure.Cosmos) SDK v3.
 
 ## Installation
