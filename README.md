@@ -241,15 +241,17 @@ class TestOrderRepository : Repository<Order>
 
 ## Running integration tests
 
-Integration tests connect to a real Cosmos DB Emulator and are skipped automatically if it is not available — they never block the build.
+Integration tests connect to a real Cosmos DB Emulator and are skipped automatically if it is not available — they never block the build. The test fixture probes the gateway and, once the port is open, waits up to ~90 s for the emulator to finish starting before running, so you can launch the emulator and run the tests right away without guessing a warm-up delay.
 
 ### Option 1 — Windows native emulator
 
 ```bash
 winget install Microsoft.Azure.CosmosEmulator
-# start via Start Menu or:
-& "C:\Program Files\Azure Cosmos DB Emulator\CosmosDB.Emulator.exe"
+# start via Start Menu or (headless):
+& "C:\Program Files\Azure Cosmos DB Emulator\CosmosDB.Emulator.exe" /NoExplorer
 ```
+
+The Windows installer imports the emulator's TLS certificate into the local trust store, so the tests connect over HTTPS with no extra setup.
 
 ### Option 2 — Docker
 
@@ -257,13 +259,15 @@ winget install Microsoft.Azure.CosmosEmulator
 docker compose up -d
 ```
 
+> **Note:** the Linux emulator's self-signed certificate is **not** trusted by the host automatically. The test fixture does not bypass certificate validation, so until you import the emulator certificate into your machine's trust store, `ReadAccountAsync` fails and the integration tests are **skipped** (not run). Run with a verbose logger (`-v normal`) to see the skip reason.
+
 ### Running the tests
 
 ```bash
 # unit tests (always available, no emulator needed)
 dotnet test Infrastructure.Data.CosmosDb.Tests
 
-# integration tests (skipped if emulator is not running)
+# integration tests (skipped if the emulator is not reachable)
 dotnet test Infrastructure.Data.CosmosDb.IntegrationTests
 ```
 
